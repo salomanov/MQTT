@@ -8,13 +8,19 @@
 Подключение:
 
 ```sh
-ssh root@192.168.1.1
+ssh admin@192.168.1.1
 ```
 
 Если SSH на нестандартном порту:
 
 ```sh
-ssh root@192.168.1.1 -p 222
+ssh admin@192.168.1.1 -p 222
+```
+
+После входа перейдите в среду Entware:
+
+```sh
+exec sh
 ```
 
 Обновить индекс пакетов Entware:
@@ -47,19 +53,19 @@ ls /opt/etc/init.d | grep -i mosq
 Обычно запуск такой:
 
 ```sh
-/opt/etc/init.d/S50mosquitto start
+/opt/etc/init.d/S80mosquitto start
 ```
 
 Перезапуск:
 
 ```sh
-/opt/etc/init.d/S50mosquitto restart
+/opt/etc/init.d/S80mosquitto restart
 ```
 
 Остановка:
 
 ```sh
-/opt/etc/init.d/S50mosquitto stop
+/opt/etc/init.d/S80mosquitto stop
 ```
 
 Проверка статуса процесса:
@@ -83,7 +89,7 @@ ps | grep mosquitto
 Пример команды для пользовательского старта:
 
 ```sh
-/opt/etc/init.d/S50mosquitto start
+/opt/etc/init.d/S80mosquitto start
 ```
 
 Где именно добавить этот вызов, зависит от того, как у вас настроены пользовательские скрипты в KeeneticOS 5.
@@ -127,7 +133,7 @@ vi /opt/etc/mosquitto/mosquitto.conf
 После изменения конфига перезапустите сервис:
 
 ```sh
-/opt/etc/init.d/S50mosquitto restart
+/opt/etc/init.d/S80mosquitto restart
 ```
 
 Проверка входа с логином и паролем:
@@ -155,7 +161,7 @@ mosquitto_passwd /opt/etc/mosquitto/passwd mqttuser
 Остановить сервис:
 
 ```sh
-/opt/etc/init.d/S50mosquitto stop
+/opt/etc/init.d/S80mosquitto stop
 ```
 
 Удалить пакеты:
@@ -193,7 +199,7 @@ opkg upgrade
 После обновления перезапустить сервис:
 
 ```sh
-/opt/etc/init.d/S50mosquitto restart
+/opt/etc/init.d/S80mosquitto restart
 ```
 
 ## Быстрая проверка
@@ -209,6 +215,72 @@ mosquitto_sub -h 127.0.0.1 -t test/topic
 ```sh
 mosquitto_pub -h 127.0.0.1 -t test/topic -m "MQTT works"
 ```
+
+## Доступ по 192.168.1.1
+
+Сейчас у вас `mosquitto` слушает только `127.0.0.1`, поэтому с других устройств в `LAN` он недоступен.
+
+Проверьте текущий конфиг:
+
+```sh
+cat /opt/etc/mosquitto/mosquitto.conf
+```
+
+Чтобы брокер принимал подключения по адресу роутера `192.168.1.1`, укажите прослушивание на всех IPv4-интерфейсах:
+
+```conf
+listener 1883 0.0.0.0
+allow_anonymous false
+password_file /opt/etc/mosquitto/passwd
+persistence true
+persistence_location /opt/var/lib/mosquitto/
+```
+
+Если хотите временно разрешить вход без пароля только для проверки, можно так:
+
+```conf
+listener 1883 0.0.0.0
+allow_anonymous true
+```
+
+Изменить файл:
+
+```sh
+vi /opt/etc/mosquitto/mosquitto.conf
+```
+
+После этого перезапустить сервис:
+
+```sh
+/opt/etc/init.d/S80mosquitto restart
+```
+
+Проверить, что порт слушается не только локально:
+
+```sh
+netstat -lntp | grep 1883
+```
+
+Если все правильно, вы увидите не только `127.0.0.1:1883`, а прослушивание на внешнем адресе или на `0.0.0.0:1883`.
+
+Проверка с другого устройства в локальной сети:
+
+```sh
+mosquitto_sub -h 192.168.1.1 -p 1883 -u mqttuser -P "YOUR_PASSWORD" -t test/topic
+```
+
+Во втором окне:
+
+```sh
+mosquitto_pub -h 192.168.1.1 -p 1883 -u mqttuser -P "YOUR_PASSWORD" -t test/topic -m "test from lan"
+```
+
+Если подключение не проходит, проверьте:
+
+- что в конфиге нет `bind_address 127.0.0.1`
+- что `listener` задан как `listener 1883 0.0.0.0`
+- что локальный firewall Keenetic не режет доступ из `LAN`
+- что пароль в `/opt/etc/mosquitto/passwd` действительно создан
 
 ## MQTT и nfqws2 на Keenetic
 
