@@ -44,10 +44,104 @@ ls /opt/etc/init.d | grep -i mosq
 /opt/etc/init.d/S50mosquitto start
 ```
 
+Перезапуск:
+
+```sh
+/opt/etc/init.d/S50mosquitto restart
+```
+
 Остановка:
 
 ```sh
 /opt/etc/init.d/S50mosquitto stop
+```
+
+Проверка статуса процесса:
+
+```sh
+ps | grep mosquitto
+```
+
+### Автозапуск через Entware
+
+На Keenetic автозапуск Entware-сервисов обычно работает, если включен запуск скриптов из `/opt/etc/init.d`.
+Проверьте после перезагрузки роутера:
+
+```sh
+ps | grep mosquitto
+```
+
+Если процесса нет, можно добавить запуск в пользовательский скрипт Keenetic.
+Практический вариант: вызвать Entware-скрипт после старта системы.
+
+Пример команды для пользовательского старта:
+
+```sh
+/opt/etc/init.d/S50mosquitto start
+```
+
+Где именно добавить этот вызов, зависит от того, как у вас настроены пользовательские скрипты в KeeneticOS 5.
+Смысл один: после монтирования `/opt` должен выполниться старт `mosquitto`.
+
+## Настройка логина и пароля
+
+Для постоянной работы не оставляйте открытый MQTT без авторизации.
+
+Создайте каталог для конфигурации и паролей:
+
+```sh
+mkdir -p /opt/etc/mosquitto
+mkdir -p /opt/var/lib/mosquitto
+```
+
+Создайте файл паролей:
+
+```sh
+mosquitto_passwd -c /opt/etc/mosquitto/passwd mqttuser
+```
+
+Команда попросит ввести пароль для пользователя `mqttuser`.
+
+Минимальный конфиг `/opt/etc/mosquitto/mosquitto.conf`:
+
+```conf
+listener 1883
+allow_anonymous false
+password_file /opt/etc/mosquitto/passwd
+persistence true
+persistence_location /opt/var/lib/mosquitto/
+```
+
+Если файл уже есть, отредактируйте его:
+
+```sh
+vi /opt/etc/mosquitto/mosquitto.conf
+```
+
+После изменения конфига перезапустите сервис:
+
+```sh
+/opt/etc/init.d/S50mosquitto restart
+```
+
+Проверка входа с логином и паролем:
+
+Подписка:
+
+```sh
+mosquitto_sub -h 127.0.0.1 -p 1883 -u mqttuser -P "YOUR_PASSWORD" -t test/topic
+```
+
+Публикация:
+
+```sh
+mosquitto_pub -h 127.0.0.1 -p 1883 -u mqttuser -P "YOUR_PASSWORD" -t test/topic -m "MQTT auth works"
+```
+
+Если нужно сменить пароль существующего пользователя:
+
+```sh
+mosquitto_passwd /opt/etc/mosquitto/passwd mqttuser
 ```
 
 ## Команды удаления MQTT
