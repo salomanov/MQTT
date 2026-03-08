@@ -3,6 +3,9 @@
 Ниже инструкция для KeeneticOS 5 через Entware (`opkg` в `/opt`).
 `nfqws2` с MQTT обычно не конфликтует.
 
+Важно: команды `ssh admin@192.168.1.1`, `exec sh`, `ps | grep mosquitto` и похожие не вставляйте одной пачкой.
+Их нужно выполнять по очереди, дожидаясь нового приглашения в терминале после каждой команды.
+
 ## Установка MQTT
 
 Подключение:
@@ -18,6 +21,18 @@ ssh admin@192.168.1.1 -p 222
 ```
 
 После входа перейдите в среду Entware:
+
+```sh
+exec sh
+```
+
+То есть порядок такой:
+
+```sh
+ssh admin@192.168.1.1
+```
+
+Потом, уже после входа на роутер:
 
 ```sh
 exec sh
@@ -40,6 +55,11 @@ opkg install mosquitto-ssl mosquitto-client-ssl
 ```sh
 opkg list | grep mosquitto
 ```
+
+Фактически у вас установились:
+
+- `mosquitto-ssl`
+- `mosquitto-client-ssl`
 
 ## Запуск и автозапуск
 
@@ -74,14 +94,26 @@ ls /opt/etc/init.d | grep -i mosq
 ps | grep mosquitto
 ```
 
+Эту команду выполняйте только после входа на роутер и после `exec sh`.
+
 ### Автозапуск через Entware
 
 На Keenetic автозапуск Entware-сервисов обычно работает, если включен запуск скриптов из `/opt/etc/init.d`.
-Проверьте после перезагрузки роутера:
+У вас это уже подтверждено: после повторного входа `mosquitto` был запущен автоматически.
+
+Проверка после перезагрузки роутера:
 
 ```sh
 ps | grep mosquitto
 ```
+
+И отдельно:
+
+```sh
+netstat -lntp | grep 1883
+```
+
+Если видите процесс `mosquitto` и порт `1883` в режиме `LISTEN`, автозапуск работает.
 
 Если процесса нет, можно добавить запуск в пользовательский скрипт Keenetic.
 Практический вариант: вызвать Entware-скрипт после старта системы.
@@ -218,7 +250,7 @@ mosquitto_pub -h 127.0.0.1 -t test/topic -m "MQTT works"
 
 ## Доступ по 192.168.1.1
 
-Сейчас у вас `mosquitto` слушает только `127.0.0.1`, поэтому с других устройств в `LAN` он недоступен.
+Сейчас у вас рабочий режим такой: `mosquitto` слушает `0.0.0.0:1883`, и MQTT Explorer уже видит брокер по адресу `192.168.1.1`.
 
 Проверьте текущий конфиг:
 
@@ -226,7 +258,25 @@ mosquitto_pub -h 127.0.0.1 -t test/topic -m "MQTT works"
 cat /opt/etc/mosquitto/mosquitto.conf
 ```
 
-Чтобы брокер принимал подключения по адресу роутера `192.168.1.1`, укажите прослушивание на всех IPv4-интерфейсах:
+Чтобы брокер принимал подключения по адресу роутера `192.168.1.1`, укажите прослушивание на всех IPv4-интерфейсах.
+
+Временный рабочий вариант без пароля:
+
+```conf
+listener 1883 0.0.0.0
+allow_anonymous true
+```
+
+Команда для записи такого конфига:
+
+```sh
+cat > /opt/etc/mosquitto/mosquitto.conf <<'EOF'
+listener 1883 0.0.0.0
+allow_anonymous true
+EOF
+```
+
+Более безопасный вариант с паролем:
 
 ```conf
 listener 1883 0.0.0.0
@@ -234,13 +284,6 @@ allow_anonymous false
 password_file /opt/etc/mosquitto/passwd
 persistence true
 persistence_location /opt/var/lib/mosquitto/
-```
-
-Если хотите временно разрешить вход без пароля только для проверки, можно так:
-
-```conf
-listener 1883 0.0.0.0
-allow_anonymous true
 ```
 
 Изменить файл:
@@ -261,9 +304,23 @@ vi /opt/etc/mosquitto/mosquitto.conf
 netstat -lntp | grep 1883
 ```
 
-Если все правильно, вы увидите не только `127.0.0.1:1883`, а прослушивание на внешнем адресе или на `0.0.0.0:1883`.
+Если все правильно, вы увидите `0.0.0.0:1883` или прослушивание на адресе `192.168.1.1`.
 
 Проверка с другого устройства в локальной сети:
+
+Без пароля:
+
+```sh
+mosquitto_sub -h 192.168.1.1 -p 1883 -t test/topic
+```
+
+Во втором окне:
+
+```sh
+mosquitto_pub -h 192.168.1.1 -p 1883 -t test/topic -m "test from lan"
+```
+
+С паролем:
 
 ```sh
 mosquitto_sub -h 192.168.1.1 -p 1883 -u mqttuser -P "YOUR_PASSWORD" -t test/topic
@@ -281,6 +338,18 @@ mosquitto_pub -h 192.168.1.1 -p 1883 -u mqttuser -P "YOUR_PASSWORD" -t test/topi
 - что `listener` задан как `listener 1883 0.0.0.0`
 - что локальный firewall Keenetic не режет доступ из `LAN`
 - что пароль в `/opt/etc/mosquitto/passwd` действительно создан
+
+Фактический успешный результат у вас выглядел так:
+
+```sh
+ps | grep mosquitto
+netstat -lntp | grep 1883
+```
+
+Ожидаемый вывод по смыслу:
+
+- процесс `mosquitto` запущен
+- порт `1883` слушается на `0.0.0.0`
 
 ## MQTT и nfqws2 на Keenetic
 
@@ -306,6 +375,8 @@ mosquitto_pub -h 192.168.1.1 -p 1883 -u mqttuser -P "YOUR_PASSWORD" -t test/topi
 ps | grep nfqws2
 ps | grep mosquitto
 ```
+
+Это две отдельные команды внутри уже открытой shell-сессии на роутере.
 
 Проверка сервиса `nfqws2`:
 
