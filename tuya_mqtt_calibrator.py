@@ -24,6 +24,7 @@ TUYA_VERSION = 3.3
 
 # === Tuya DPS ===
 TUYA_TEMP_DPS = "3"
+TUYA_WORK_STATE_DPS = "5"
 TUYA_CALIBRATION_DPS = "20"
 TUYA_CALIBRATION_MIN = -99
 TUYA_CALIBRATION_MAX = 99
@@ -72,6 +73,7 @@ def calibrate_tuya(reference_temp: float) -> dict[str, Any]:
 
     dps = status["dps"]
     tuya_temp = dps.get(TUYA_TEMP_DPS)
+    work_state = dps.get(TUYA_WORK_STATE_DPS)
     current_calibration = dps.get(TUYA_CALIBRATION_DPS)
 
     if tuya_temp is None or current_calibration is None:
@@ -86,6 +88,7 @@ def calibrate_tuya(reference_temp: float) -> dict[str, Any]:
         "reference_temp": reference_temp,
         "tuya_temp_raw": tuya_temp,
         "tuya_temp_c": tuya_temp / 10,
+        "work_state": work_state,
         "current_calibration": current_calibration,
         "requested_calibration": requested_calibration,
         "new_calibration": new_calibration,
