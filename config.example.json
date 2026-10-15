@@ -1,0 +1,34 @@
+{
+  "mqtt": {
+    "host": "192.168.1.1",
+    "port": 1883,
+    "topic_set": "tuya/calibrate/set",
+    "topic_get": "tuya/calibrate/get",
+    "topic_status": "tuya/calibrate/status",
+    "topic_availability": "tuya/calibrate/availability",
+    "user": "",
+    "password": "",
+    "retain_status": true,
+    "qos": 1
+  },
+  "tuya": {
+    "device_id": "bf8b29a44ecc9a2477tbgd",
+    "local_key": "=*R-Krigxx/Jka5i",
+    "ip": "192.168.1.92",
+    "version": 3.3,
+    "socket_timeout": 5
+  },
+  "dps": {
+    "temp_dps": "3",
+    "work_state_dps": "5",
+    "calibration_dps": "20",
+    "calibration_min": -99,
+    "calibration_max": 99,
+    "reference_temp_min": 10.0,
+    "reference_temp_max": 35.0
+  },
+  "logging": {
+    "level": "INFO",
+    "log_file": "/opt/var/log/tuya_mqtt_calibrator.log"
+  }
+}
