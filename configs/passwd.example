@@ -1,0 +1,17 @@
+# ==============================================================================
+# Mosquitto Password File Example
+# Router target: /opt/etc/mosquitto/passwd
+# ==============================================================================
+# ПРИМЕЧАНИЕ: Этот файл НЕЛЬЗЯ редактировать вручную для добавления паролей,
+# так как Mosquitto хранит пароли в виде SHA512 хешей.
+#
+# Создание первого пользователя и файла:
+#   mosquitto_passwd -c /opt/etc/mosquitto/passwd tuya
+#
+# Добавление последующих пользователей (без ключа -c):
+#   mosquitto_passwd /opt/etc/mosquitto/passwd homeassistant
+#   mosquitto_passwd /opt/etc/mosquitto/passwd admin
+#
+# Формат захешированных записей в готовом файле:
+# tuya:$7$101$...хеш_пароля...
+# homeassistant:$7$101$...хеш_пароля...

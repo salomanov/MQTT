@@ -1,4 +1,17 @@
+# Файлы БД Mosquitto и логи
+*.db
+*.log
+/backups/
+
+# Секреты и реальные учетные данные
+passwd
+acl
+conf.d/*.local.conf
+
+# Python артефакты
 __pycache__/
 *.py[cod]
-config.json
-*.log
+
+# Временные файлы ОС
+Thumbs.db
+.DS_Store

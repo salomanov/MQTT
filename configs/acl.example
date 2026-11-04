@@ -1,0 +1,20 @@
+# ==============================================================================
+# Mosquitto Access Control List (ACL) Example
+# Router target: /opt/etc/mosquitto/acl
+# ==============================================================================
+
+# Общие правила для анонимных пользователей (если allow_anonymous true)
+# topic read home/status
+
+# Права для сервиса Tuya Calibrator
+user tuya
+topic readwrite tuya/#
+
+# Права для системы Home Assistant
+user homeassistant
+topic readwrite #
+
+# Права для администратора
+user admin
+topic readwrite #
+topic read $SYS/#

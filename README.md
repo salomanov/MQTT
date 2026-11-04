@@ -1,435 +1,166 @@
-# MQTT на Xiaomi R3G v1 (KeeneticOS 5) с nfqws2
+# Mosquitto MQTT Broker (Xiaomi R3G v1 / KeeneticOS Entware)
 
-Ниже инструкция для KeeneticOS 5 через Entware (`opkg` в `/opt`).
-`nfqws2` с MQTT обычно не конфликтует.
+Репозиторий эталонных конфигураций, скриптов автоматизации и руководств по эксплуатации брокера **Eclipse Mosquitto** на роутере Xiaomi Mi WiFi Router 3G v1 (KeeneticOS 5, MIPS MT7621, 128 MB RAM, Entware на USB-накопителе `/opt`).
 
-Важно: команды `ssh admin@192.168.1.1`, `sh`, `exec sh`, `ps | grep mosquitto` и похожие не вставляйте одной пачкой.
-Их нужно выполнять по очереди, дожидаясь нового приглашения в терминале после каждой команды.
+---
 
-## Установка MQTT
+## 1. Архитектура и Разделение Ответственности
 
-Подключение:
+Данный репозиторий является **центральным источником правды** для конфигурации MQTT-брокера на роутере:
+- Управление параметрами слушателей (`listeners`) и сетевой изоляцией.
+- Защита флеш-накопителя от износа (`persistence` с интервалом сброса 30 минут).
+- Защита памяти роутера от переполнения (`limits` для 128 MB RAM).
+- Шаблоны паролей (`passwd`) и списков контроля доступа (`acl`).
+- Скрипты развертывания, резервного копирования и проверки доступности.
 
-```sh
-ssh admin@192.168.1.1
+> [!NOTE]
+> **Клиенты и микросервисы умного дома**:  
+> Демон калибровки термостата Tuya вынесен в собственный независимый репозиторий:  
+> 🔗 [Tuya Calibrator (DPS -> MQTT)](https://github.com/salomanov/Tuya.git) (`../Tuya`).
+
+---
+
+## 2. Структура Репозитория
+
+```text
+MQTT/
+├── configs/
+│   ├── mosquitto.conf              # Главный конфигурационный файл (include_dir conf.d)
+│   ├── conf.d/
+│   │   ├── 10-listeners.conf       # Настройки портов (порт 1883 для LAN и локалхоста)
+│   │   ├── 20-security.conf        # Режим авторизации (анонимный / пароли)
+│   │   ├── 30-limits-mips.conf     # Лимиты ОЗУ и очередей под 128 MB RAM
+│   │   └── 40-persistence.conf     # Защита USB-флешки от износа (autosave 1800s)
+│   ├── passwd.example              # Пример формата файла паролей
+│   └── acl.example                 # Пример разграничения прав топиков
+├── scripts/
+│   ├── deploy-config.ps1           # Автоматическая загрузка, валидация и перезапуск на роутере
+│   ├── backup-config.ps1           # Скачивание текущих настроек с роутера
+│   └── test-broker.ps1             # Быстрый тест TCP 1883 и Ping/Pong в топик
+├── .gitignore                      # Исключение паролей, баз *.db и логов
+└── README.md                       # Настоящее руководство
 ```
 
-Если SSH на нестандартном порту:
+---
 
-```sh
-ssh admin@192.168.1.1 -p 222
+## 3. Оптимизация для Роутера (MIPS / 128 MB RAM / USB)
+
+### 3.1. Защита флеш-памяти USB-накопителя (`conf.d/40-persistence.conf`)
+При частых обновлениях датчиков стандартные настройки `persistence true` могут инициировать запись на диск при каждом входящем retain-сообщении, быстро изнашивая флешку.
+- `autosave_interval 1800` — запись базы `mosquitto.db` происходит периодически раз в 30 минут.
+- `autosave_on_changes false` — исключает сброс на диск на каждое отдельное изменение топика.
+
+### 3.2. Ограничение потребления ОЗУ (`conf.d/30-limits-mips.conf`)
+Xiaomi R3G имеет 128 МБ оперативной памяти, разделяемой между KeeneticOS, `nfqws2`, `usque` и другими сервисами.
+- `memory_limit 16777216` — максимальный объем памяти под брокер (16 МБ). Защищает ядро от падения по OOM (Out-Of-Memory).
+- `max_queued_messages 1000` — лимит очереди недоставленных сообщений для спящих клиентов QoS 1/2.
+- `max_packet_size 65536` — отсечение аномально больших пакетов (> 64 КБ).
+
+### 3.3. Сетевая безопасность (`conf.d/10-listeners.conf` и `20-security.conf`)
+- По умолчанию брокер слушает `0.0.0.0:1883` для беспрепятственного взаимодействия с устройствами домашней сети (192.168.1.0/24).
+- При необходимости строгой изоляции можно привязать слушатель строго к внутреннему IP:
+  ```conf
+  listener 1883 192.168.1.1
+  listener 1883 127.0.0.1
+  ```
+
+---
+
+## 4. Быстрый Старт и Развертывание
+
+### 4.1. Автоматическое развертывание с ПК
+Запустите скрипт PowerShell для отправки модульных конфигов на роутер:
+
+```powershell
+.\scripts\deploy-config.ps1
 ```
 
-После входа сначала перейдите из `(config)>` в `(show)>`:
+Скрипт выполнит:
+1. Подключение к `192.168.1.1:222` по SSH/SFTP.
+2. Создание всех необходимых папок (`/opt/etc/mosquitto/conf.d`, `/opt/var/lib/mosquitto`, `/opt/var/log`).
+3. Загрузку конфигурационных файлов.
+4. Валидацию синтаксиса через `mosquitto -c /opt/etc/mosquitto/mosquitto.conf -t`.
+5. Перезапуск службы `/opt/etc/init.d/S80mosquitto restart`.
 
-```sh
-sh
+### 4.2. Проверка работы брокера
+Для быстрой проверки сокета и эхо-ответа запустите:
+
+```powershell
+.\scripts\test-broker.ps1
 ```
 
-То есть порядок такой:
+---
 
+## 5. Ручное Управление на Роутере
+
+Подключение к роутеру:
 ```sh
-ssh admin@192.168.1.1
+ssh root@192.168.1.1 -p 222
 ```
 
-Потом, уже после входа на роутер:
-
+### Управление службой Entware:
 ```sh
-sh
-```
+# Проверка статуса
+/opt/etc/init.d/S80mosquitto check
 
-И только потом:
+# Перезапуск
+/opt/etc/init.d/S80mosquitto restart
 
-```sh
-exec sh
-```
+# Остановка
+/opt/etc/init.d/S80mosquitto stop
 
-Обновить индекс пакетов Entware:
-
-```sh
-opkg update
-```
-
-Установить брокер и клиент:
-
-```sh
-opkg install mosquitto-ssl mosquitto-client-ssl
-```
-
-Проверить, какие пакеты `mosquitto` доступны:
-
-```sh
-opkg list | grep mosquitto
-```
-
-Фактически у вас установились:
-
-- `mosquitto-ssl`
-- `mosquitto-client-ssl`
-
-## Запуск и автозапуск
-
-На Keenetic с Entware сервис обычно запускается скриптом в `/opt/etc/init.d`.
-Проверьте имя скрипта:
-
-```sh
-ls /opt/etc/init.d | grep -i mosq
-```
-
-Обычно запуск такой:
-
-```sh
+# Запуск
 /opt/etc/init.d/S80mosquitto start
 ```
 
-Перезапуск:
-
-```sh
-/opt/etc/init.d/S80mosquitto restart
-```
-
-Остановка:
-
-```sh
-/opt/etc/init.d/S80mosquitto stop
-```
-
-Проверка статуса процесса:
-
-```sh
-ps | grep mosquitto
-```
-
-Эту команду выполняйте только после входа на роутер, `sh`, а затем `exec sh`.
-
-### Автозапуск через Entware
-
-На Keenetic автозапуск Entware-сервисов обычно работает, если USB-накопитель с `/opt` успешно смонтирован и включен запуск скриптов из `/opt/etc/init.d`.
-У вас это уже подтверждено: после повторного входа `mosquitto` был запущен автоматически.
-
-Проверка после перезагрузки роутера:
-
-```sh
-ps | grep mosquitto
-```
-
-И отдельно:
-
-```sh
-netstat -lntp | grep 1883
-```
-
-Если видите процесс `mosquitto` и порт `1883` в режиме `LISTEN`, автозапуск работает.
-
-Если после перезагрузки роутера сервисы из `/opt` не стартуют, проверьте состояние USB-накопителя и файловой системы.
-При ошибках вида `EXT4-fs`, `JBD2`, `failed to mount`, `input/output error` проблема уже не в `mosquitto`, а в поврежденном разделе с Entware.
-
-Если процесса нет, можно добавить запуск в пользовательский скрипт Keenetic.
-Практический вариант: вызвать Entware-скрипт после старта системы.
-
-Пример команды для пользовательского старта:
-
-```sh
-/opt/etc/init.d/S80mosquitto start
-```
-
-Где именно добавить этот вызов, зависит от того, как у вас настроены пользовательские скрипты в KeeneticOS 5.
-Смысл один: после монтирования `/opt` должен выполниться старт `mosquitto`.
-
-## Настройка логина и пароля
-
-Для постоянной работы не оставляйте открытый MQTT без авторизации.
-
-Создайте каталог для конфигурации и паролей:
-
-```sh
-mkdir -p /opt/etc/mosquitto
-mkdir -p /opt/var/lib/mosquitto
-```
-
-Создайте файл паролей:
-
-```sh
-mosquitto_passwd -c /opt/etc/mosquitto/passwd mqttuser
-```
-
-Команда попросит ввести пароль для пользователя `mqttuser`.
-
-Минимальный конфиг `/opt/etc/mosquitto/mosquitto.conf`:
-
-```conf
-listener 1883
-allow_anonymous false
-password_file /opt/etc/mosquitto/passwd
-persistence true
-persistence_location /opt/var/lib/mosquitto/
-```
-
-Если файл уже есть, отредактируйте его:
-
-```sh
-vi /opt/etc/mosquitto/mosquitto.conf
-```
-
-После изменения конфига перезапустите сервис:
-
-```sh
-/opt/etc/init.d/S80mosquitto restart
-```
-
-Проверка входа с логином и паролем:
-
-Подписка:
-
-```sh
-mosquitto_sub -h 127.0.0.1 -p 1883 -u mqttuser -P "YOUR_PASSWORD" -t test/topic
-```
-
-Публикация:
-
-```sh
-mosquitto_pub -h 127.0.0.1 -p 1883 -u mqttuser -P "YOUR_PASSWORD" -t test/topic -m "MQTT auth works"
-```
-
-Если нужно сменить пароль существующего пользователя:
-
-```sh
-mosquitto_passwd /opt/etc/mosquitto/passwd mqttuser
-```
-
-## Команды удаления MQTT
-
-Остановить сервис:
-
-```sh
-/opt/etc/init.d/S80mosquitto stop
-```
-
-Удалить пакеты:
-
-```sh
-opkg remove mosquitto-client-ssl mosquitto-ssl
-```
-
-Если хотите удалить неиспользуемые зависимости:
-
-```sh
-opkg remove --autoremove mosquitto-client-ssl mosquitto-ssl
-```
-
-## Команды обновления MQTT
-
-Обновить индекс:
-
-```sh
-opkg update
-```
-
-Обновить только MQTT-пакеты:
-
-```sh
-opkg upgrade mosquitto-ssl mosquitto-client-ssl
-```
-
-Обновить все пакеты Entware (осторожно на проде):
-
-```sh
-opkg upgrade
-```
-
-После обновления перезапустить сервис:
-
-```sh
-/opt/etc/init.d/S80mosquitto restart
-```
-
-## Быстрая проверка
-
-Подписка:
-
-```sh
-mosquitto_sub -h 127.0.0.1 -t test/topic
-```
-
-Публикация:
-
-```sh
-mosquitto_pub -h 127.0.0.1 -t test/topic -m "MQTT works"
-```
-
-## Доступ по 192.168.1.1
-
-Сейчас у вас рабочий режим такой: `mosquitto` слушает `0.0.0.0:1883`, и MQTT Explorer уже видит брокер по адресу `192.168.1.1`.
-
-Проверьте текущий конфиг:
-
-```sh
-cat /opt/etc/mosquitto/mosquitto.conf
-```
-
-Чтобы брокер принимал подключения по адресу роутера `192.168.1.1`, укажите прослушивание на всех IPv4-интерфейсах.
-
-Временный рабочий вариант без пароля:
-
-```conf
-listener 1883 0.0.0.0
-allow_anonymous true
-```
-
-Команда для записи такого конфига:
-
-```sh
-cat > /opt/etc/mosquitto/mosquitto.conf <<'EOF'
-listener 1883 0.0.0.0
-allow_anonymous true
-EOF
-```
-
-Более безопасный вариант с паролем:
-
-```conf
-listener 1883 0.0.0.0
-allow_anonymous false
-password_file /opt/etc/mosquitto/passwd
-persistence true
-persistence_location /opt/var/lib/mosquitto/
-```
-
-Изменить файл:
-
-```sh
-vi /opt/etc/mosquitto/mosquitto.conf
-```
-
-После этого перезапустить сервис:
-
-```sh
-/opt/etc/init.d/S80mosquitto restart
-```
-
-Проверить, что порт слушается не только локально:
-
-```sh
-netstat -lntp | grep 1883
-```
-
-Если все правильно, вы увидите `0.0.0.0:1883` или прослушивание на адресе `192.168.1.1`.
-
-Проверка с другого устройства в локальной сети:
-
-Без пароля:
-
-```sh
-mosquitto_sub -h 192.168.1.1 -p 1883 -t test/topic
-```
-
-Во втором окне:
-
-```sh
-mosquitto_pub -h 192.168.1.1 -p 1883 -t test/topic -m "test from lan"
-```
-
-С паролем:
-
-```sh
-mosquitto_sub -h 192.168.1.1 -p 1883 -u mqttuser -P "YOUR_PASSWORD" -t test/topic
-```
-
-Во втором окне:
-
-```sh
-mosquitto_pub -h 192.168.1.1 -p 1883 -u mqttuser -P "YOUR_PASSWORD" -t test/topic -m "test from lan"
-```
-
-Если подключение не проходит, проверьте:
-
-- что в конфиге нет `bind_address 127.0.0.1`
-- что `listener` задан как `listener 1883 0.0.0.0`
-- что локальный firewall Keenetic не режет доступ из `LAN`
-- что пароль в `/opt/etc/mosquitto/passwd` действительно создан
-
-Фактический успешный результат у вас выглядел так:
-
+### Проверка процессов и портов:
 ```sh
 ps | grep mosquitto
 netstat -lntp | grep 1883
 ```
 
-Ожидаемый вывод по смыслу:
-
-- процесс `mosquitto` запущен
-- порт `1883` слушается на `0.0.0.0`
-
-## MQTT и nfqws2 на Keenetic
-
-По вашей схеме `nfqws2` установлен через Entware, поэтому MQTT тоже логично держать в Entware.
-Оба сервиса могут работать одновременно.
-
-Почему обычно нет конфликта:
-
-- `nfqws2` модифицирует трафик по правилам `iptables/NFQUEUE`
-- `mosquitto` просто слушает TCP-порт `1883`
-- локальный MQTT внутри `LAN` обычно работает отдельно от сценариев, ради которых ставят `nfqws2`
-
-Что рекомендуется:
-
-- использовать MQTT только в локальной сети
-- не открывать порт `1883` в интернет без необходимости
-- не включать в политику `NFQWS` устройства, для которых важен предсказуемый локальный MQTT
-- после установки MQTT проверить, что `nfqws2` и `mosquitto` одновременно запущены
-
-Проверка процессов:
-
+### Просмотр логов:
 ```sh
-ps | grep nfqws2
-ps | grep mosquitto
+tail -f /opt/var/log/mosquitto.log
 ```
 
-Это две отдельные команды внутри уже открытой shell-сессии на роутере.
+---
 
-Проверка сервиса `nfqws2`:
+## 6. Настройка Пользователей и Паролей
 
-```sh
-/opt/etc/init.d/S51nfqws2 status
-```
+Для перевода брокера в защищенный режим:
 
-Проверка MQTT локально на роутере:
+1. **Создайте файл паролей на роутере**:
+   ```sh
+   # Создание первого пользователя (-c создает новый файл):
+   mosquitto_passwd -c /opt/etc/mosquitto/passwd tuya
 
-```sh
-mosquitto_sub -h 127.0.0.1 -t test/topic
-mosquitto_pub -h 127.0.0.1 -t test/topic -m "test from router"
-```
+   # Добавление последующих пользователей:
+   mosquitto_passwd /opt/etc/mosquitto/passwd homeassistant
+   ```
 
-Проверка с устройства в локальной сети:
+2. **Включите обязательную авторизацию** в `configs/conf.d/20-security.conf` (или напрямую в `/opt/etc/mosquitto/conf.d/20-security.conf`):
+   ```conf
+   allow_anonymous false
+   password_file /opt/etc/mosquitto/passwd
+   ```
 
-```sh
-mosquitto_sub -h 192.168.1.1 -t test/topic
-mosquitto_pub -h 192.168.1.1 -t test/topic -m "test from lan"
-```
+3. **Перезапустите брокер**:
+   ```sh
+   /opt/etc/init.d/S80mosquitto restart
+   ```
 
-Если локально MQTT работает, а с устройств в сети нет, проверьте:
+4. **Проверьте подключение с авторизацией**:
+   ```sh
+   mosquitto_sub -h 127.0.0.1 -p 1883 -u tuya -P "ПАРОЛЬ" -t "test/#"
+   mosquitto_pub -h 127.0.0.1 -p 1883 -u tuya -P "ПАРОЛЬ" -t "test/ping" -m "pong"
+   ```
 
-- на каком адресе слушает `mosquitto`
-- открыт ли доступ к порту `1883` внутри `LAN`
-- нет ли пользовательских правил, которые заворачивают этот трафик в лишнюю обработку
+---
 
-Если есть сомнения, слушает ли брокер нужный порт:
+## 7. Совместимость с nfqws2 и сетевыми службами
 
-```sh
-netstat -lntp | grep 1883
-```
-
-Практический вывод:
-
-`nfqws2` оставляете для обходных сетевых сценариев, а MQTT используете как локальный брокер для датчиков, автоматизации и Home Assistant.
-Эти роли друг другу обычно не мешают.
-
-## Сохранить инструкцию в git
-
-В этой папке:
-
-```sh
-git init
-git add README.md
-git commit -m "MQTT guide for KeeneticOS 5 (Xiaomi R3G v1)"
-```
+На роутере одновременно работают `nfqws2`, `usque` (SOCKS5), `redsocks` и `mosquitto`.
+- `mosquitto` взаимодействует по стандартному протоколу TCP/1883.
+- Трафик между локальными клиентами (192.168.1.0/24) и роутером не проходит через NFQUEUE и не перенаправляется в прокси.
+- Внешние подключения из интернета к порту 1883 по умолчанию заблокированы файрволом KeeneticOS (доступ разрешен только из Home / LAN).
