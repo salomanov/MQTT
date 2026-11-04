@@ -8,7 +8,8 @@ param (
     [int]$SshPort = 222,
     [string]$SshUser = "root",
     [string]$Password = "keenetic",
-    [switch]$SkipRestart
+    [switch]$SkipRestart,
+    [switch]$StrictHostKey
 )
 
 $PSScript = Join-Path $PSScriptRoot "deploy.py"
@@ -16,6 +17,9 @@ $ArgList = @("--host", $RouterHost, "--port", $SshPort, "--user", $SshUser, "--p
 
 if ($SkipRestart) {
     $ArgList += "--skip-restart"
+}
+if ($StrictHostKey) {
+    $ArgList += "--strict-host-key"
 }
 
 python $PSScript @ArgList
